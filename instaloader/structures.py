@@ -1172,8 +1172,12 @@ class Profile:
         # The feed's user node carries no total media count; expose it as unknown so
         # reading Profile.mediacount does not trigger a (failing) web_profile_info fetch.
         profile._node.setdefault("edge_owner_to_timeline_media", {"count": None})
-        # There is no richer profile metadata available through this endpoint.
-        profile._has_full_metadata = True
+        # The feed node lacks richer profile metadata (viewer-relationship flags
+        # like has_blocked_viewer, follower counts). Anonymously there is no
+        # richer source, so mark it complete; logged in, leave it incomplete so
+        # _obtain_metadata can enrich the node through the doc_id profile query
+        # the first time a missing key is read.
+        profile._has_full_metadata = not context.is_logged_in
         profile._feed_first_page = feed
         return profile
 
