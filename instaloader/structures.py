@@ -1095,6 +1095,15 @@ class Profile:
                     "" if context.is_logged_in else " Login (--login) may be required to access it."
                 )
             ) from err
+        except AbortDownloadException:
+            # feedback_required on this one endpoint while the rest of the session
+            # works is a per-endpoint throttle, not an account-level flag. Try the
+            # mobile feed endpoint ONCE (a different rate bucket); if that also
+            # refuses, let the abort stand so the account is protected.
+            profile = cls._from_feed(context, username=username)
+            if profile is not None:
+                return profile
+            raise
         if data and data.get("user"):
             profile = cls(context, data["user"])
             profile._has_full_metadata = True
@@ -1252,6 +1261,11 @@ class Profile:
             except (QueryReturnedBadRequestException, QueryReturnedNotFoundException,
                     KeyError) as err:
                 primary_error = err
+            except AbortDownloadException as err:
+                # per-endpoint feedback_required throttle: skip the retry sleep and
+                # let the doc_id fallback (a different rate bucket) have one shot
+                primary_error = err
+                break
         # Fallback: PolarisProfilePageContentQuery doc_id query, which needs normalizing.
         # It requires the numeric user id. A by-username lookup does not know it yet
         # (self._node only carries the username), so resolve it via top search first —
@@ -1265,6 +1279,9 @@ class Profile:
                     user_id = node.get('id') or node.get('pk')
                     break
             if not user_id:
+                if isinstance(primary_error, AbortDownloadException):
+                    # a throttled primary must never masquerade as "does not exist"
+                    raise primary_error
                 raise ProfileNotExistsException(
                     'Profile {} does not exist.'.format(self.username)) from primary_error
         variables = {
