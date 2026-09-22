@@ -1393,14 +1393,22 @@ class Instaloader:
         """
         profile = None
         profile_name_not_exists_err = None
+        abort_err = None
         try:
             profile = Profile.from_username(self.context, profile_name)
         except ProfileNotExistsException as err:
             profile_name_not_exists_err = err
+        except AbortDownloadException as err:
+            # Username-resolution endpoints can be throttled (feedback_required,
+            # 429) while id-based GraphQL lookups keep working. With a stored
+            # profile id available, resolve through it instead of aborting.
+            abort_err = err
         if latest_stamps is None:
             profile_id = self.load_profile_id(profile_name)
         else:
             profile_id = latest_stamps.get_profile_id(profile_name)
+        if profile_id is None and abort_err is not None:
+            raise abort_err                # throttled and no stored id to fall back on
         if profile_id is not None:
             if (profile is None) or \
                     (profile_id != profile.userid):
